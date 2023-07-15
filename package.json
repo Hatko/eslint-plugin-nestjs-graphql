@@ -13,7 +13,6 @@
     "dist/**"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "build": "pnpm tsc"
   },
   "keywords": ["eslint", "plugin", "nestjs", "graphql"],
