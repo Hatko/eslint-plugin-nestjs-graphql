@@ -1,10 +1,10 @@
 {
   "name": "eslint-plugin-nestjs-graphql",
   "author": "Vladyslav Zavalykhatko",
-  "homepage": "https://github.com/Quramy/jest-prisma",
+  "homepage": "https://github.com/Hatko/eslint-plugin-nestjs-graphql",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Quramy/jest-prisma.git"
+    "url": "https://github.com/Hatko/eslint-plugin-nestjs-graphql.git"
   },
   "version": "1.0.0",
   "description": "",
