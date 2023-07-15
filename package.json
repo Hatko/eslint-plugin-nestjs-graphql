@@ -1,5 +1,11 @@
 {
   "name": "eslint-plugin-nestjs-graphql",
+  "author": "Vladyslav Zavalykhatko",
+  "homepage": "https://github.com/Quramy/jest-prisma",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Quramy/jest-prisma.git"
+  },
   "version": "1.0.0",
   "description": "",
   "main": "./dist/index.js",
@@ -10,9 +16,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "pnpm tsc"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": ["eslint", "plugin", "nestjs", "graphql"],
+  "license": "MIT",
   "devDependencies": {
     "@types/estree": "^1.0.1",
     "@types/node": "^20.4.2",
