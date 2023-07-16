@@ -6,7 +6,10 @@
     "type": "git",
     "url": "https://github.com/Hatko/eslint-plugin-nestjs-graphql.git"
   },
-  "version": "1.0.0",
+  "bugs": {
+    "url": "https://github.com/Hatko/eslint-plugin-nestjs-graphql/issues"
+  },
+  "version": "1.0.2",
   "description": "",
   "main": "./dist/index.js",
   "files": [
