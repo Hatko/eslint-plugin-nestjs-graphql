@@ -76,76 +76,22 @@ export const rule = createRule({
         const { isDecoratedNullable, isDecoratedArray, typeFromDecorator } =
           parsedDecoratorInfo
 
-        const compareTypes = (returnType: string, decoratorType: string) => {
-          if (returnType === decoratorType) {
-            return
-          }
+        const unwrapUnion = (topReturnType: TSESTree.TSUnionType) => {
+          const types = topReturnType.types.map((typeWithinUnion) => {
+            if (typeWithinUnion.type === 'TSArrayType') {
+              if (!isDecoratedArray) {
+                context.report({
+                  node,
+                  messageId: 'typeMismatchArrayIsExpected',
+                })
+              }
 
-          const foundTypes = types[returnType as keyof typeof types]
-
-          if (foundTypes?.some((t) => t === decoratorType)) {
-            return
-          }
-
-          context.report({ node, messageId: 'typeMismatch' })
-        }
-
-        const topReturnType =
-          unwrapPromise(node.value.returnType.typeAnnotation) ??
-          node.value.returnType.typeAnnotation
-
-        if (isDecoratedArray) {
-          //
-          // 2 Array cases have to be processed separately because of a different type information structure
-          if (
-            isTypeReferenceIdentifier(topReturnType) &&
-            topReturnType.typeName.name === 'Array'
-          ) {
-            if (
-              topReturnType.typeParameters?.params[0].type !== 'TSTypeQuery' ||
-              topReturnType.typeParameters?.params[0].exprName.type !==
-                'Identifier'
-            ) {
-              throw new Error(
-                'Unexpected array argument type - please contact the author of the rule',
+              const { elementType } = typeWithinUnion
+              return (
+                nameFromTypeReferenceIdentifier(elementType) || elementType.type
               )
             }
 
-            const returnType =
-              topReturnType.typeParameters.params[0].exprName.name
-
-            compareTypes(returnType, typeFromDecorator)
-
-            return
-          }
-
-          if (topReturnType.type === 'TSArrayType') {
-            const { elementType } = topReturnType
-
-            const returnType =
-              nameFromTypeReferenceIdentifier(elementType) || elementType.type
-
-            compareTypes(returnType, typeFromDecorator)
-
-            return
-          }
-          //
-
-          context.report({ node, messageId: 'typeMismatchArrayIsExpected' })
-
-          return
-        }
-
-        const name = nameFromTypeReferenceIdentifier(topReturnType)
-
-        if (name) {
-          compareTypes(name, typeFromDecorator)
-
-          return
-        }
-
-        if (topReturnType.type === 'TSUnionType') {
-          const types = topReturnType.types.map((typeWithinUnion) => {
             if (typeWithinUnion.type === 'TSTypeReference') {
               const unwrapped =
                 unwrapPromise(typeWithinUnion) ?? typeWithinUnion
@@ -159,7 +105,9 @@ export const rule = createRule({
               }
 
               return name
-            } else if (
+            }
+
+            if (
               typeWithinUnion.type === 'TSTypeOperator' &&
               typeWithinUnion.operator === 'keyof'
             ) {
@@ -173,7 +121,9 @@ export const rule = createRule({
               }
 
               return typeWithinUnion.typeAnnotation?.exprName.name
-            } else if (typeWithinUnion.type === 'TSTypeQuery') {
+            }
+
+            if (typeWithinUnion.type === 'TSTypeQuery') {
               if (typeWithinUnion.exprName.type !== 'Identifier') {
                 throw new Error(
                   'Unexpected typeAnnotation type - please contact the author of the rule',
@@ -181,9 +131,9 @@ export const rule = createRule({
               }
 
               return typeWithinUnion.exprName.name
-            } else {
-              return typeWithinUnion.type
             }
+
+            return typeWithinUnion.type
           })
 
           if (
@@ -198,16 +148,77 @@ export const rule = createRule({
             })
           }
 
-          const returnType = types.filter(
-            (t) => t !== 'TSNullKeyword' && t !== 'TSUndefinedKeyword',
-          )[0]
+          return {
+            type: types.filter(
+              (t) => t !== 'TSNullKeyword' && t !== 'TSUndefinedKeyword',
+            )[0],
+          }
+        }
 
-          compareTypes(returnType, typeFromDecorator)
+        const typeToCompare = (() => {
+          const topReturnType =
+            unwrapPromise(node.value.returnType.typeAnnotation) ??
+            node.value.returnType.typeAnnotation
 
+          if (isDecoratedArray) {
+            if (
+              isTypeReferenceIdentifier(topReturnType) &&
+              topReturnType.typeName.name === 'Array'
+            ) {
+              if (
+                topReturnType.typeParameters?.params[0].type !==
+                  'TSTypeQuery' ||
+                topReturnType.typeParameters?.params[0].exprName.type !==
+                  'Identifier'
+              ) {
+                throw new Error(
+                  'Unexpected array argument type - please contact the author of the rule',
+                )
+              }
+
+              return topReturnType.typeParameters.params[0].exprName.name
+            }
+
+            if (topReturnType.type === 'TSArrayType') {
+              const { elementType } = topReturnType
+
+              return (
+                nameFromTypeReferenceIdentifier(elementType) || elementType.type
+              )
+            }
+
+            if (topReturnType.type === 'TSUnionType') {
+              return unwrapUnion(topReturnType).type
+            }
+
+            // Type isn't found - return 'Array' to trigger error
+            return 'Array'
+          }
+
+          const name = nameFromTypeReferenceIdentifier(topReturnType)
+
+          if (name) {
+            return name
+          }
+
+          if (topReturnType.type === 'TSUnionType') {
+            return unwrapUnion(topReturnType).type
+          }
+
+          return topReturnType.type
+        })()
+
+        if (typeToCompare === typeFromDecorator) {
           return
         }
 
-        compareTypes(topReturnType.type, typeFromDecorator)
+        const foundTypes = types[typeToCompare as keyof typeof types]
+
+        if (foundTypes?.some((t) => t === typeFromDecorator)) {
+          return
+        }
+
+        context.report({ node, messageId: 'typeMismatch' })
       },
     }
   },
