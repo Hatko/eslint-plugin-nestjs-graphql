@@ -9,7 +9,7 @@
   "bugs": {
     "url": "https://github.com/Hatko/eslint-plugin-nestjs-graphql/issues"
   },
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Ensure correct typing for NestJS GraphQL decorated methods",
   "main": "./dist/index.js",
   "files": [
@@ -21,10 +21,10 @@
   "keywords": ["eslint", "plugin", "nestjs", "graphql"],
   "license": "MIT",
   "devDependencies": {
-    "@types/estree": "^1.0.1",
-    "@types/node": "^20.5.0",
-    "@typescript-eslint/utils": "^6.3.0",
-    "@typescript-eslint/types": "^6.3.0",
-    "typescript": "^5.1.6"
+    "@types/estree": "^1.0.3",
+    "@types/node": "^20.8.7",
+    "@typescript-eslint/utils": "^6.8.0",
+    "@typescript-eslint/types": "^6.8.0",
+    "typescript": "^5.2.2"
   }
 }
