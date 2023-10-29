@@ -82,7 +82,7 @@ The plugin supports only one rule: `matching-return-type`.
 
 ```sh
 # inside your project's working tree
-npm eslint-plugin-nestjs-graphql --save-dev
+npm i eslint-plugin-nestjs-graphql --save-dev
 ```
 
 The rule is off by default. To turn it on, add the following to your `.eslintrc` file:
