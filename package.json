@@ -16,15 +16,16 @@
     "dist/**"
   ],
   "scripts": {
+    "bump": "npx npm-check-updates -u --deep && pnpm i && pnpm upgrade",
     "build": "pnpm tsc"
   },
   "keywords": ["eslint", "plugin", "nestjs", "graphql"],
   "license": "MIT",
   "devDependencies": {
     "@types/estree": "^1.0.3",
-    "@types/node": "^20.8.7",
-    "@typescript-eslint/utils": "^6.8.0",
-    "@typescript-eslint/types": "^6.8.0",
+    "@types/node": "^20.8.9",
+    "@typescript-eslint/utils": "^6.9.0",
+    "@typescript-eslint/types": "^6.9.0",
     "typescript": "^5.2.2"
   }
 }
