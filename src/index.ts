@@ -1,4 +1,4 @@
-import { rule } from './rule'
+import { rule } from './matching-return-type.rule'
 
 module.exports = {
   rules: {
