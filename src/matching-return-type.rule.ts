@@ -278,7 +278,15 @@ const parseDecorators = (node: TSESTree.MethodDefinition) => {
     return undefined
   }
 
-  const [typeArgument, parametersArgument] = args
+  const [typeArgument, parametersArgument] = (() => {
+    // ResolveField decorator supports passing name of the resolved field as a first parameter
+    // If it's passed, ignore it
+    if (args[0].type === 'Literal') {
+      return [args[1], args[2]]
+    }
+
+    return args
+  })()
 
   const isDecoratedNullable =
     (parametersArgument && checkDecoratedNullable(parametersArgument)) || false
