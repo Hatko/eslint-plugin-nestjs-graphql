@@ -1,6 +1,6 @@
-import { ESLintUtils } from '@typescript-eslint/utils'
 import { TSESTree } from '@typescript-eslint/types/dist'
 import { Decorator } from '@typescript-eslint/types/dist/generated/ast-spec'
+import { ESLintUtils } from '@typescript-eslint/utils'
 import { RuleContext } from '@typescript-eslint/utils/dist/ts-eslint'
 
 const createRule = ESLintUtils.RuleCreator((name) => name)
@@ -16,9 +16,9 @@ const unwrapPromise = (typeNode: TSESTree.TypeNode) => {
     typeNode.type === 'TSTypeReference' &&
     typeNode.typeName.type === 'Identifier' &&
     typeNode.typeName.name === 'Promise' &&
-    typeNode.typeParameters
+    typeNode.typeArguments
   ) {
-    return typeNode.typeParameters.params[0]
+    return typeNode.typeArguments.params[0]
   }
 }
 
@@ -173,15 +173,15 @@ const processNode = (
         topReturnType.typeName.name === 'Array'
       ) {
         if (
-          topReturnType.typeParameters?.params[0].type !== 'TSTypeQuery' ||
-          topReturnType.typeParameters?.params[0].exprName.type !== 'Identifier'
+          topReturnType.typeArguments?.params[0].type !== 'TSTypeQuery' ||
+          topReturnType.typeArguments?.params[0].exprName.type !== 'Identifier'
         ) {
           throw new Error(
             'Unexpected array argument type - please contact the author of the rule',
           )
         }
 
-        return topReturnType.typeParameters.params[0].exprName.name
+        return topReturnType.typeArguments.params[0].exprName.name
       }
 
       if (topReturnType.type === 'TSArrayType') {
@@ -305,11 +305,11 @@ const parseDecorators = (node: TSESTree.MethodDefinition) => {
     if (typeArgument.body.type === 'ArrayExpression') {
       if (typeArgument.body.elements[0]?.type === 'Identifier') {
         return typeArgument.body.elements[0]?.name
-      } else {
-        throw new Error(
-          'Unexpected Array Element Type - please contact the author of the rule',
-        )
       }
+
+      throw new Error(
+        'Unexpected Array Element Type - please contact the author of the rule',
+      )
     }
 
     return typeArgument.body.name

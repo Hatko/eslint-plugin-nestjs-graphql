@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-nestjs-graphql",
-  "author": "Vladyslav Zavalykhatko",
+  "author": "Hatkom ApS",
   "homepage": "https://github.com/Hatko/eslint-plugin-nestjs-graphql",
   "repository": {
     "type": "git",
@@ -16,12 +16,18 @@
     "dist/**"
   ],
   "scripts": {
-    "bump": "npx npm-check-updates -u --deep && pnpm i && pnpm upgrade",
-    "build": "pnpm tsc"
+    "bump": "npx npm-check-updates -u --deep && bun i && bun upgrade",
+    "build": "bun tsc"
   },
-  "keywords": ["eslint", "plugin", "nestjs", "graphql"],
+  "keywords": [
+    "eslint",
+    "plugin",
+    "nestjs",
+    "graphql"
+  ],
   "license": "MIT",
   "devDependencies": {
+    "@biomejs/biome": "2.1.2",
     "@types/estree": "^1.0.8",
     "@types/node": "^24.7.2",
     "@typescript-eslint/utils": "^8.46.0",
