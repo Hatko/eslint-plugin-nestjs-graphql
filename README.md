@@ -11,6 +11,7 @@ The plugin supports rules:
 `matching-return-type`
 `matching-resolve-field-parent-type`
 `require-resolve-field-for-nested-models`
+`no-optional-fields-in-object-type`
 
 ## Motivation
 
@@ -166,6 +167,30 @@ class User {
 }
 ```
 
+### no-optional-fields-in-object-type
+
+Optional (`?`) properties on `@ObjectType` classes are easy to forget to populate — the value is silently `undefined` and the field is absent from the response. Requiring `| null` instead forces an explicit assignment at every construction site, so a missing value becomes a TypeScript error.
+
+*Valid*
+
+```typescript
+@ObjectType()
+class User {
+  id!: string;
+  nickname!: string | null;
+}
+```
+
+*Invalid*
+
+```typescript
+@ObjectType()
+class User {
+  id!: string;
+  nickname?: string;
+}
+```
+
 ## Installation
 
 ```sh
@@ -182,6 +207,7 @@ The rules are off by default. To turn them on, add the following to your `.eslin
     "nestjs-graphql/matching-return-type": "error", // `error` level is recommended
     "nestjs-graphql/matching-resolve-field-parent-type": "error", // `error` level is recommended
     "nestjs-graphql/require-resolve-field-for-nested-models": "error", // `error` level is recommended
+    "nestjs-graphql/no-optional-fields-in-object-type": "error", // `error` level is recommended
   }
 }
 ```
