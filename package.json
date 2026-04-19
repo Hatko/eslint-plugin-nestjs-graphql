@@ -33,5 +33,8 @@
     "@typescript-eslint/utils": "^8.58.2",
     "@typescript-eslint/types": "^8.58.2",
     "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.3.0"
   }
 }

@@ -312,6 +312,20 @@ class User {
 }
 ```
 
+## Branded / flavored types
+
+The three `matching-*-type` rules compare the GraphQL scalar declared on the decorator (`String`, `Int`, `ID`, …) against the TypeScript annotation. By default the comparison is pure-AST, so a branded string like
+
+```typescript
+type AIFDocumentId = Flavor<string, '__AIFDocumentId'>
+```
+
+would be treated as an unknown type — `@Args({ type: () => ID }) id: AIFDocumentId` would false-positive as a mismatch.
+
+To fix this, enable typed linting by setting `parserOptions.project` (or `projectService`) in your ESLint config. When available, the rules use the TypeScript type checker to resolve the actual type — `Flavor<string, …>`, `Brand<T, …>`, intersections of `string`, aliases of aliases, etc. all reduce to their apparent primitive (`string` / `number` / `boolean`) and match the corresponding scalar.
+
+Without typed linting, the rules fall back to the same AST-only comparison used in earlier versions — any non-primitive identifier that doesn't literally match the scalar name is flagged as a mismatch, which will false-positive on branded types. Enable typed linting to avoid this.
+
 ## Installation
 
 ```sh

@@ -2,12 +2,14 @@ import { AST_NODE_TYPES, TSESLint, TSESTree } from '@typescript-eslint/utils'
 
 import {
   createRule,
+  decoratorTypeMatchesTsType,
   getDecoratorName,
+  getTypedServices,
   NULLABLE_NONE,
   type NullableSpec,
   readNullableSpec,
   readTsType,
-  TS_KEYWORD_TO_GRAPHQL_SCALARS,
+  type TypedServices,
 } from './util'
 
 const RESOLVER_METHOD_DECORATORS = new Set([
@@ -52,18 +54,22 @@ export const rule = createRule({
     },
     type: 'problem',
   },
-  create: (context) => ({
-    'MethodDefinition[decorators.length>=1]:exit'(
-      node: TSESTree.MethodDefinition,
-    ) {
-      processNode(node, context)
-    },
-  }),
+  create: (context) => {
+    const services = getTypedServices(context)
+    return {
+      'MethodDefinition[decorators.length>=1]:exit'(
+        node: TSESTree.MethodDefinition,
+      ) {
+        processNode(node, context, services)
+      },
+    }
+  },
 })
 
 const processNode = (
   node: TSESTree.MethodDefinition,
   context: Readonly<TSESLint.RuleContext<MessageIds, never[]>>,
+  services: TypedServices | null,
 ) => {
   if (node.value.type !== AST_NODE_TYPES.FunctionExpression) return
   if (!node.value.returnType) return
@@ -91,12 +97,9 @@ const processNode = (
   }
 
   // Base type mismatch
-  if (tsType.name !== typeFromDecorator) {
-    const scalarMatches = TS_KEYWORD_TO_GRAPHQL_SCALARS[tsType.name]
-    if (!scalarMatches?.includes(typeFromDecorator)) {
-      context.report({ node, messageId: 'typeMismatch' })
-      return
-    }
+  if (!decoratorTypeMatchesTsType(typeFromDecorator, tsType, services)) {
+    context.report({ node, messageId: 'typeMismatch' })
+    return
   }
 
   // Nullable: only report TS-nullable-but-decorator-isn't (preserve original semantic)

@@ -2,10 +2,11 @@ import { AST_NODE_TYPES, TSESTree } from '@typescript-eslint/utils'
 
 import {
   createRule,
+  decoratorTypeMatchesTsType,
   findDecoratorByName,
   findOptionsObject,
   getDecoratorName,
-  GRAPHQL_SCALAR_TO_TS_KEYWORD,
+  getTypedServices,
   readNullableSpec,
   readTsType,
   TS_KEYWORD_DISPLAY,
@@ -52,12 +53,6 @@ const extractFieldType = (
   return undefined
 }
 
-const decoratorTypeMatchesTs = (decoratorName: string, tsName: string) => {
-  if (decoratorName === tsName) return true
-  const tsKeywords = GRAPHQL_SCALAR_TO_TS_KEYWORD[decoratorName]
-  return tsKeywords?.includes(tsName) ?? false
-}
-
 const displayTsName = (name: string) => TS_KEYWORD_DISPLAY[name] ?? name
 
 export const rule = createRule<Options, MessageIds>({
@@ -87,93 +82,101 @@ export const rule = createRule<Options, MessageIds>({
     },
     type: 'problem',
   },
-  create: (context) => ({
-    ClassDeclaration(node) {
-      if (!findDecoratorByName(node.decorators, FIELD_HOST_DECORATORS)) return
+  create: (context) => {
+    const services = getTypedServices(context)
+    return {
+      ClassDeclaration(node) {
+        if (!findDecoratorByName(node.decorators, FIELD_HOST_DECORATORS)) return
 
-      for (const member of node.body.body) {
-        if (member.type !== AST_NODE_TYPES.PropertyDefinition) continue
+        for (const member of node.body.body) {
+          if (member.type !== AST_NODE_TYPES.PropertyDefinition) continue
 
-        const fieldDecorator = member.decorators?.find(
-          (decorator) => getDecoratorName(decorator) === 'Field',
-        )
-        if (!fieldDecorator) continue
+          const fieldDecorator = member.decorators?.find(
+            (decorator) => getDecoratorName(decorator) === 'Field',
+          )
+          if (!fieldDecorator) continue
 
-        const decoratorType = extractFieldType(fieldDecorator)
-        const options = findOptionsObject(fieldDecorator)
-        const nullableSpec = readNullableSpec(options)
-        const hasAnyNullableOption = nullableSpec.list || nullableSpec.items
+          const decoratorType = extractFieldType(fieldDecorator)
+          const options = findOptionsObject(fieldDecorator)
+          const nullableSpec = readNullableSpec(options)
+          const hasAnyNullableOption = nullableSpec.list || nullableSpec.items
 
-        if (!decoratorType && !hasAnyNullableOption) continue
+          if (!decoratorType && !hasAnyNullableOption) continue
 
-        const tsType = readTsType(
-          member.typeAnnotation?.typeAnnotation,
-          member.optional === true,
-        )
-        if (!tsType) continue
+          const tsType = readTsType(
+            member.typeAnnotation?.typeAnnotation,
+            member.optional === true,
+          )
+          if (!tsType) continue
 
-        const reportNode = member.key
+          const reportNode = member.key
 
-        if (decoratorType) {
-          if (decoratorType.isArray && !tsType.isArray) {
-            context.report({
-              node: reportNode,
-              messageId: 'arrayExpected',
-              data: { decoratorType: decoratorType.name },
-            })
-          } else if (!decoratorType.isArray && tsType.isArray) {
-            context.report({ node: reportNode, messageId: 'arrayNotExpected' })
-          } else if (!decoratorTypeMatchesTs(decoratorType.name, tsType.name)) {
-            const tsDisplay = displayTsName(tsType.name)
-            context.report({
-              node: reportNode,
-              messageId: 'typeMismatch',
-              data: {
-                decoratorType: decoratorType.isArray
-                  ? `[${decoratorType.name}]`
-                  : decoratorType.name,
-                tsType: tsType.isArray ? `${tsDisplay}[]` : tsDisplay,
-              },
-            })
+          if (decoratorType) {
+            if (decoratorType.isArray && !tsType.isArray) {
+              context.report({
+                node: reportNode,
+                messageId: 'arrayExpected',
+                data: { decoratorType: decoratorType.name },
+              })
+            } else if (!decoratorType.isArray && tsType.isArray) {
+              context.report({
+                node: reportNode,
+                messageId: 'arrayNotExpected',
+              })
+            } else if (
+              !decoratorTypeMatchesTsType(decoratorType.name, tsType, services)
+            ) {
+              const tsDisplay = displayTsName(tsType.name)
+              context.report({
+                node: reportNode,
+                messageId: 'typeMismatch',
+                data: {
+                  decoratorType: decoratorType.isArray
+                    ? `[${decoratorType.name}]`
+                    : decoratorType.name,
+                  tsType: tsType.isArray ? `${tsDisplay}[]` : tsDisplay,
+                },
+              })
+            }
           }
-        }
 
-        if (nullableSpec.list && !tsType.listNullable) {
-          context.report({
-            node: reportNode,
-            messageId: 'listNullableOptionWithoutListNullableType',
-          })
-        } else if (
-          !nullableSpec.list &&
-          tsType.listNullable &&
-          decoratorType
-        ) {
-          context.report({
-            node: reportNode,
-            messageId: 'listNullableTypeWithoutOption',
-          })
-        }
-
-        const arrayContext =
-          (decoratorType?.isArray ?? false) || tsType.isArray
-        if (arrayContext) {
-          if (nullableSpec.items && !tsType.itemsNullable) {
+          if (nullableSpec.list && !tsType.listNullable) {
             context.report({
               node: reportNode,
-              messageId: 'itemsNullableOptionWithoutItemsNullableType',
+              messageId: 'listNullableOptionWithoutListNullableType',
             })
           } else if (
-            !nullableSpec.items &&
-            tsType.itemsNullable &&
+            !nullableSpec.list &&
+            tsType.listNullable &&
             decoratorType
           ) {
             context.report({
               node: reportNode,
-              messageId: 'itemsNullableTypeWithoutOption',
+              messageId: 'listNullableTypeWithoutOption',
             })
           }
+
+          const arrayContext =
+            (decoratorType?.isArray ?? false) || tsType.isArray
+          if (arrayContext) {
+            if (nullableSpec.items && !tsType.itemsNullable) {
+              context.report({
+                node: reportNode,
+                messageId: 'itemsNullableOptionWithoutItemsNullableType',
+              })
+            } else if (
+              !nullableSpec.items &&
+              tsType.itemsNullable &&
+              decoratorType
+            ) {
+              context.report({
+                node: reportNode,
+                messageId: 'itemsNullableTypeWithoutOption',
+              })
+            }
+          }
         }
-      }
-    },
-  }),
+      },
+    }
+  },
 })

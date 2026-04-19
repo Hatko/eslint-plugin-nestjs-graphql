@@ -1,4 +1,10 @@
-import { AST_NODE_TYPES, ESLintUtils, TSESTree } from '@typescript-eslint/utils'
+import {
+  AST_NODE_TYPES,
+  ESLintUtils,
+  TSESLint,
+  TSESTree,
+  type ParserServicesWithTypeInformation,
+} from '@typescript-eslint/utils'
 
 export const createRule = ESLintUtils.RuleCreator((name) => name)
 
@@ -109,6 +115,7 @@ export type TsType = {
   isArray: boolean
   listNullable: boolean
   itemsNullable: boolean
+  innerTypeNode: TSESTree.TypeNode
 }
 
 const stripNullish = (typeNode: TSESTree.TypeNode) => {
@@ -162,6 +169,7 @@ export const readTsType = (
       isArray: true,
       listNullable,
       itemsNullable,
+      innerTypeNode: itemInner,
     }
   }
 
@@ -179,6 +187,7 @@ export const readTsType = (
         isArray: true,
         listNullable,
         itemsNullable,
+        innerTypeNode: itemInner,
       }
     }
   }
@@ -195,5 +204,65 @@ export const readTsType = (
     isArray: false,
     listNullable,
     itemsNullable: false,
+    innerTypeNode: inner,
   }
+}
+
+export type TypedServices = ParserServicesWithTypeInformation
+
+export const getTypedServices = <
+  M extends string,
+  O extends readonly unknown[],
+>(
+  context: Readonly<TSESLint.RuleContext<M, O>>,
+): TypedServices | null => {
+  try {
+    const services = ESLintUtils.getParserServices(context, true)
+    return services.program ? (services as TypedServices) : null
+  } catch {
+    return null
+  }
+}
+
+const TS_KEYWORD_PRIMITIVES: ReadonlySet<string> = new Set([
+  'TSStringKeyword',
+  'TSNumberKeyword',
+  'TSBooleanKeyword',
+])
+
+const tsTypeAssignableToKeyword = (
+  services: TypedServices,
+  typeNode: TSESTree.TypeNode,
+  keyword: string,
+): boolean => {
+  const tsNode = services.esTreeNodeToTSNodeMap.get(typeNode)
+  if (!tsNode) return false
+  const checker = services.program.getTypeChecker()
+  const type = checker.getTypeAtLocation(tsNode)
+  const targetType =
+    keyword === 'TSStringKeyword'
+      ? checker.getStringType()
+      : keyword === 'TSNumberKeyword'
+        ? checker.getNumberType()
+        : keyword === 'TSBooleanKeyword'
+          ? checker.getBooleanType()
+          : undefined
+  if (!targetType) return false
+  return checker.isTypeAssignableTo(type, targetType)
+}
+
+export const decoratorTypeMatchesTsType = (
+  decoratorName: string,
+  tsType: TsType,
+  services: TypedServices | null,
+): boolean => {
+  if (decoratorName === tsType.name) return true
+  const allowedKeywords = GRAPHQL_SCALAR_TO_TS_KEYWORD[decoratorName]
+  if (!allowedKeywords) return false
+  if (allowedKeywords.includes(tsType.name)) return true
+  if (TS_KEYWORD_PRIMITIVES.has(tsType.name)) return false
+  if (!services) return false
+  return allowedKeywords.some((keyword) =>
+    tsTypeAssignableToKeyword(services, tsType.innerTypeNode, keyword),
+  )
 }
