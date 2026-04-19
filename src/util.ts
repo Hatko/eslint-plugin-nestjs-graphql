@@ -35,20 +35,45 @@ export const findDecoratorByName = (
   return decorators.find((decorator) => match(getDecoratorName(decorator)))
 }
 
-export const isNullableOption = (
+export type NullableSpec = {
+  list: boolean
+  items: boolean
+}
+
+export const NULLABLE_NONE: NullableSpec = { list: false, items: false }
+
+export const readNullableSpec = (
   optionsArg: TSESTree.CallExpressionArgument | undefined,
-): boolean => {
+): NullableSpec => {
   if (!optionsArg || optionsArg.type !== AST_NODE_TYPES.ObjectExpression) {
-    return false
+    return NULLABLE_NONE
   }
 
-  return optionsArg.properties.some(
-    (prop) =>
-      prop.type === AST_NODE_TYPES.Property &&
-      prop.key.type === AST_NODE_TYPES.Identifier &&
-      prop.key.name === 'nullable' &&
-      prop.value.type === AST_NODE_TYPES.Literal &&
-      prop.value.value === true,
+  const prop = optionsArg.properties.find(
+    (p): p is TSESTree.Property =>
+      p.type === AST_NODE_TYPES.Property &&
+      p.key.type === AST_NODE_TYPES.Identifier &&
+      p.key.name === 'nullable',
+  )
+
+  if (!prop || prop.value.type !== AST_NODE_TYPES.Literal) return NULLABLE_NONE
+
+  const value = prop.value.value
+  if (value === true) return { list: true, items: false }
+  if (value === 'items') return { list: false, items: true }
+  if (value === 'itemsAndList') return { list: true, items: true }
+  return NULLABLE_NONE
+}
+
+export const findOptionsObject = (
+  decorator: TSESTree.Decorator,
+): TSESTree.ObjectExpression | undefined => {
+  if (decorator.expression.type !== AST_NODE_TYPES.CallExpression) {
+    return undefined
+  }
+  return decorator.expression.arguments.find(
+    (arg): arg is TSESTree.ObjectExpression =>
+      arg.type === AST_NODE_TYPES.ObjectExpression,
   )
 }
 
@@ -77,4 +102,98 @@ export const TS_KEYWORD_DISPLAY: Record<string, string> = {
   TSStringKeyword: 'string',
   TSNumberKeyword: 'number',
   TSBooleanKeyword: 'boolean',
+}
+
+export type TsType = {
+  name: string
+  isArray: boolean
+  listNullable: boolean
+  itemsNullable: boolean
+}
+
+const stripNullish = (typeNode: TSESTree.TypeNode) => {
+  if (typeNode.type !== AST_NODE_TYPES.TSUnionType) {
+    return { inner: typeNode, nullish: false }
+  }
+  let nullish = false
+  const kept: TSESTree.TypeNode[] = []
+  for (const member of typeNode.types) {
+    if (
+      member.type === AST_NODE_TYPES.TSNullKeyword ||
+      member.type === AST_NODE_TYPES.TSUndefinedKeyword
+    ) {
+      nullish = true
+      continue
+    }
+    kept.push(member)
+  }
+  const [first, ...rest] = kept
+  if (!first || rest.length > 0) {
+    return { inner: typeNode, nullish }
+  }
+  return { inner: first, nullish }
+}
+
+const baseName = (typeNode: TSESTree.TypeNode): string => {
+  if (
+    typeNode.type === AST_NODE_TYPES.TSTypeReference &&
+    typeNode.typeName.type === AST_NODE_TYPES.Identifier
+  ) {
+    return typeNode.typeName.name
+  }
+  return typeNode.type
+}
+
+export const readTsType = (
+  typeNode: TSESTree.TypeNode | undefined,
+  topLevelOptional: boolean,
+): TsType | undefined => {
+  if (!typeNode) return undefined
+
+  const { inner, nullish } = stripNullish(typeNode)
+  const listNullable = nullish || topLevelOptional
+
+  if (inner.type === AST_NODE_TYPES.TSArrayType) {
+    const { inner: itemInner, nullish: itemsNullable } = stripNullish(
+      inner.elementType,
+    )
+    return {
+      name: baseName(itemInner),
+      isArray: true,
+      listNullable,
+      itemsNullable,
+    }
+  }
+
+  if (
+    inner.type === AST_NODE_TYPES.TSTypeReference &&
+    inner.typeName.type === AST_NODE_TYPES.Identifier &&
+    inner.typeName.name === 'Array' &&
+    inner.typeArguments
+  ) {
+    const element = inner.typeArguments.params[0]
+    if (element) {
+      const { inner: itemInner, nullish: itemsNullable } = stripNullish(element)
+      return {
+        name: baseName(itemInner),
+        isArray: true,
+        listNullable,
+        itemsNullable,
+      }
+    }
+  }
+
+  if (
+    inner.type === AST_NODE_TYPES.TSTypeOperator &&
+    inner.operator === 'readonly'
+  ) {
+    return readTsType(inner.typeAnnotation, topLevelOptional)
+  }
+
+  return {
+    name: baseName(inner),
+    isArray: false,
+    listNullable,
+    itemsNullable: false,
+  }
 }

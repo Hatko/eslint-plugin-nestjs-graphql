@@ -11,9 +11,11 @@ The plugin supports rules:
 `matching-return-type`
 `matching-resolve-field-parent-type`
 `matching-args-type`
+`matching-field-type`
 `require-resolve-field-for-nested-models`
 `require-resolver-type-arg-with-resolve-field`
 `no-optional-fields-in-object-type`
+`no-redundant-field-decorator`
 
 ## Motivation
 
@@ -171,7 +173,15 @@ class User {
 
 ### matching-args-type
 
-Mirrors `matching-return-type`, but on `@Args` parameters. When `@Args('name', { type: () => X, nullable?: boolean })` is given, this rule verifies that the TypeScript parameter type matches the declared `type`, and that `{ nullable: true }` agrees with the presence of `| null` / `| undefined` / `?` in the annotation. When `@Args` has no options object, analysis is skipped — the compiler plugin infers from TypeScript, so there's nothing to drift.
+Mirrors `matching-return-type`, but on `@Args` parameters. When `@Args('name', { type: () => X, nullable?: ... })` is given, this rule verifies that the TypeScript parameter type matches the declared `type`, and that the `nullable` option agrees with the annotation. Array nullability is modelled distinctly:
+
+| `nullable` option       | expected TS shape          |
+| ----------------------- | -------------------------- |
+| `true`                  | `X \| null` or `X[] \| null` |
+| `'items'`               | `(X \| null)[]`            |
+| `'itemsAndList'`        | `(X \| null)[] \| null`    |
+
+All three of `| null`, `| undefined`, and `?:` are accepted to express nullability at the list level, but `| null` is recommended for consistency with `no-optional-fields-in-object-type`. When `@Args` has no options object, analysis is skipped — the compiler plugin infers from TypeScript, so there's nothing to drift.
 
 *Valid*
 
@@ -180,6 +190,7 @@ Mirrors `matching-return-type`, but on `@Args` parameters. When `@Args('name', {
   user(
     @Args('id', { type: () => Int }) id: number,
     @Args('filter', { type: () => String, nullable: true }) filter: string | null,
+    @Args('tags', { type: () => [String], nullable: 'items' }) tags: (string | null)[],
   ) { ... }
 ```
 
@@ -193,6 +204,13 @@ Mirrors `matching-return-type`, but on `@Args` parameters. When `@Args('name', {
 ```typescript
   @Query(() => User)
   user(@Args('id', { type: () => Int, nullable: true }) id: number) { ... }  // nullable: true without | null
+```
+
+```typescript
+  @Query(() => [User])
+  users(
+    @Args('ids', { type: () => [Int], nullable: 'items' }) ids: number[],  // decorator says items nullable, type doesn't
+  ) { ... }
 ```
 
 ### require-resolver-type-arg-with-resolve-field
@@ -216,6 +234,57 @@ class UserResolver {
 class UserResolver {
   @ResolveField(() => [Post])
   posts(@Parent() user: User) { ... }
+}
+```
+
+### matching-field-type
+
+Parity rule for `@Field`-decorated properties on `@ObjectType`, `@InputType`, and `@ArgsType` classes. Same contract as `matching-args-type` — verifies the TypeScript property type matches the decorator's type argument, and that `nullable` agrees with the annotation (including the `'items'` and `'itemsAndList'` forms for arrays). Properties without an explicit `@Field` are skipped: the NestJS GraphQL compiler plugin infers their type from TypeScript.
+
+*Valid*
+
+```typescript
+@ObjectType()
+class User {
+  @Field(() => ID) id!: string;
+  @Field(() => String, { nullable: true }) nickname!: string | null;
+  @Field(() => [String], { nullable: 'items' }) tags!: (string | null)[];
+}
+```
+
+*Invalid*
+
+```typescript
+@ObjectType()
+class User {
+  @Field(() => Int) name!: string;                // Int vs string
+  @Field(() => String) nickname!: string | null;  // TS nullable, decorator isn't
+}
+```
+
+### no-redundant-field-decorator
+
+Autofixes away `@Field` decorators that carry no information the NestJS GraphQL compiler plugin can't derive from TypeScript — i.e. no `type: () => X` function and a TS type that's one of `string`, `number`, `boolean`. Trivial options (`nullable`, `description`) don't rescue the decorator; any other option does. **This rule assumes the compiler plugin is enabled in your `nest-cli.json` — otherwise `@Field` is mandatory and should not be stripped.**
+
+*Valid* (decorator is load-bearing — skipped)
+
+```typescript
+@ObjectType()
+class User {
+  @Field(() => Int) count!: number;                       // explicit type function
+  @Field({ complexity: 5 }) name!: string;                // non-trivial option
+  @Field() profile!: Profile;                             // non-primitive TS type
+}
+```
+
+*Invalid* (autofixable — decorator will be removed)
+
+```typescript
+@ObjectType()
+class User {
+  @Field() name!: string;
+  @Field({ nullable: true }) nickname!: string | null;
+  @Field({ description: 'The user display name' }) displayName!: string;
 }
 ```
 
@@ -259,9 +328,11 @@ The rules are off by default. To turn them on, add the following to your `.eslin
     "nestjs-graphql/matching-return-type": "error", // `error` level is recommended
     "nestjs-graphql/matching-resolve-field-parent-type": "error", // `error` level is recommended
     "nestjs-graphql/matching-args-type": "error", // `error` level is recommended
+    "nestjs-graphql/matching-field-type": "error", // `error` level is recommended
     "nestjs-graphql/require-resolve-field-for-nested-models": "error", // `error` level is recommended
     "nestjs-graphql/require-resolver-type-arg-with-resolve-field": "error", // `error` level is recommended
     "nestjs-graphql/no-optional-fields-in-object-type": "error", // `error` level is recommended
+    "nestjs-graphql/no-redundant-field-decorator": "error", // compiler-plugin only; see rule docs
   }
 }
 ```

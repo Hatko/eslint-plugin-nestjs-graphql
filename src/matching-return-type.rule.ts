@@ -3,7 +3,10 @@ import { AST_NODE_TYPES, TSESLint, TSESTree } from '@typescript-eslint/utils'
 import {
   createRule,
   getDecoratorName,
-  isNullableOption,
+  NULLABLE_NONE,
+  type NullableSpec,
+  readNullableSpec,
+  readTsType,
   TS_KEYWORD_TO_GRAPHQL_SCALARS,
 } from './util'
 
@@ -25,23 +28,11 @@ const unwrapPromise = (typeNode: TSESTree.TypeNode) => {
   return undefined
 }
 
-type TypeReferenceIdentifier = Omit<TSESTree.TSTypeReference, 'typeName'> & {
-  typeName: TSESTree.Identifier
-}
-
-const isTypeReferenceIdentifier = (
-  typeNode: TSESTree.TypeNode,
-): typeNode is TypeReferenceIdentifier =>
-  typeNode.type === AST_NODE_TYPES.TSTypeReference &&
-  typeNode.typeName.type === AST_NODE_TYPES.Identifier
-
-const nameFromTypeReferenceIdentifier = (typeNode: TSESTree.TypeNode) =>
-  isTypeReferenceIdentifier(typeNode) ? typeNode.typeName.name : undefined
-
 type MessageIds =
   | 'typeMismatch'
   | 'typeMismatchArrayIsExpected'
-  | 'unexpectedNullable'
+  | 'unexpectedListNullable'
+  | 'unexpectedItemsNullable'
 
 export const rule = createRule({
   name: 'matching-return-type',
@@ -50,7 +41,10 @@ export const rule = createRule({
     messages: {
       typeMismatch: 'Type mismatch',
       typeMismatchArrayIsExpected: 'Type mismatch - array is expected',
-      unexpectedNullable: 'Nullable return, but not decorated nullable',
+      unexpectedListNullable:
+        'Return type is nullable, but the decorator is missing `nullable: true` (or `nullable: \'itemsAndList\'`).',
+      unexpectedItemsNullable:
+        'Array element type is nullable, but the decorator is missing `nullable: \'items\'` (or `nullable: \'itemsAndList\'`).',
     },
     schema: [],
     docs: {
@@ -74,118 +68,59 @@ const processNode = (
   if (node.value.type !== AST_NODE_TYPES.FunctionExpression) return
   if (!node.value.returnType) return
 
-  const parsedDecoratorInfo = parseDecorators(node)
-  if (!parsedDecoratorInfo) return
+  const parsed = parseDecorators(node)
+  if (!parsed) return
 
-  const { isDecoratedNullable, isDecoratedArray, typeFromDecorator } =
-    parsedDecoratorInfo
+  const { decoratorNullable, isDecoratedArray, typeFromDecorator } = parsed
 
-  const unwrapUnion = (topReturnType: TSESTree.TSUnionType) => {
-    const types = topReturnType.types.map((typeWithinUnion) => {
-      if (typeWithinUnion.type === AST_NODE_TYPES.TSArrayType) {
-        if (!isDecoratedArray) {
-          context.report({ node, messageId: 'typeMismatchArrayIsExpected' })
-        }
-        const { elementType } = typeWithinUnion
-        return nameFromTypeReferenceIdentifier(elementType) || elementType.type
-      }
+  const innerReturnType =
+    unwrapPromise(node.value.returnType.typeAnnotation) ??
+    node.value.returnType.typeAnnotation
 
-      if (typeWithinUnion.type === AST_NODE_TYPES.TSTypeReference) {
-        const unwrapped = unwrapPromise(typeWithinUnion) ?? typeWithinUnion
-        return nameFromTypeReferenceIdentifier(unwrapped) ?? unwrapped.type
-      }
+  const tsType = readTsType(innerReturnType, false)
+  if (!tsType) return
 
-      if (
-        typeWithinUnion.type === AST_NODE_TYPES.TSTypeOperator &&
-        typeWithinUnion.operator === 'keyof' &&
-        typeWithinUnion.typeAnnotation?.type === AST_NODE_TYPES.TSTypeQuery &&
-        typeWithinUnion.typeAnnotation.exprName.type ===
-          AST_NODE_TYPES.Identifier
-      ) {
-        return typeWithinUnion.typeAnnotation.exprName.name
-      }
+  // Array-ness mismatch
+  if (isDecoratedArray && !tsType.isArray) {
+    context.report({ node, messageId: 'typeMismatchArrayIsExpected' })
+    return
+  }
+  if (!isDecoratedArray && tsType.isArray) {
+    context.report({ node, messageId: 'typeMismatch' })
+    return
+  }
 
-      if (
-        typeWithinUnion.type === AST_NODE_TYPES.TSTypeQuery &&
-        typeWithinUnion.exprName.type === AST_NODE_TYPES.Identifier
-      ) {
-        return typeWithinUnion.exprName.name
-      }
-
-      return typeWithinUnion.type
-    })
-
-    if (
-      types.find(
-        (t) =>
-          t === AST_NODE_TYPES.TSNullKeyword ||
-          t === AST_NODE_TYPES.TSUndefinedKeyword,
-      ) &&
-      !isDecoratedNullable
-    ) {
-      context.report({ node, messageId: 'unexpectedNullable' })
-    }
-
-    return {
-      type: types.filter(
-        (t) =>
-          t !== AST_NODE_TYPES.TSNullKeyword &&
-          t !== AST_NODE_TYPES.TSUndefinedKeyword,
-      )[0],
+  // Base type mismatch
+  if (tsType.name !== typeFromDecorator) {
+    const scalarMatches = TS_KEYWORD_TO_GRAPHQL_SCALARS[tsType.name]
+    if (!scalarMatches?.includes(typeFromDecorator)) {
+      context.report({ node, messageId: 'typeMismatch' })
+      return
     }
   }
 
-  const typeToCompare = (() => {
-    const topReturnType =
-      unwrapPromise(node.value.returnType.typeAnnotation) ??
-      node.value.returnType.typeAnnotation
-
-    if (isDecoratedArray) {
-      if (
-        isTypeReferenceIdentifier(topReturnType) &&
-        topReturnType.typeName.name === 'Array' &&
-        topReturnType.typeArguments?.params[0]?.type ===
-          AST_NODE_TYPES.TSTypeQuery &&
-        topReturnType.typeArguments.params[0].exprName.type ===
-          AST_NODE_TYPES.Identifier
-      ) {
-        return topReturnType.typeArguments.params[0].exprName.name
-      }
-
-      if (topReturnType.type === AST_NODE_TYPES.TSArrayType) {
-        const { elementType } = topReturnType
-        return nameFromTypeReferenceIdentifier(elementType) || elementType.type
-      }
-
-      if (topReturnType.type === AST_NODE_TYPES.TSUnionType) {
-        return unwrapUnion(topReturnType)?.type
-      }
-
-      // Type isn't found - return 'Array' to trigger error
-      return 'Array'
-    }
-
-    const name = nameFromTypeReferenceIdentifier(topReturnType)
-    if (name) return name
-
-    if (topReturnType.type === AST_NODE_TYPES.TSUnionType) {
-      return unwrapUnion(topReturnType)?.type
-    }
-
-    return topReturnType.type
-  })()
-
-  if (typeToCompare === typeFromDecorator) return
-
-  if (typeof typeToCompare === 'string') {
-    const matches = TS_KEYWORD_TO_GRAPHQL_SCALARS[typeToCompare]
-    if (matches?.includes(typeFromDecorator)) return
+  // Nullable: only report TS-nullable-but-decorator-isn't (preserve original semantic)
+  if (tsType.listNullable && !decoratorNullable.list) {
+    context.report({ node, messageId: 'unexpectedListNullable' })
   }
-
-  context.report({ node, messageId: 'typeMismatch' })
+  if (
+    isDecoratedArray &&
+    tsType.itemsNullable &&
+    !decoratorNullable.items
+  ) {
+    context.report({ node, messageId: 'unexpectedItemsNullable' })
+  }
 }
 
-const parseDecorators = (node: TSESTree.MethodDefinition) => {
+type ParsedDecorator = {
+  decoratorNullable: NullableSpec
+  isDecoratedArray: boolean
+  typeFromDecorator: string
+}
+
+const parseDecorators = (
+  node: TSESTree.MethodDefinition,
+): ParsedDecorator | undefined => {
   const filteredDecorators = node.decorators.filter((decorator) => {
     const name = getDecoratorName(decorator)
     return name !== undefined && RESOLVER_METHOD_DECORATORS.has(name)
@@ -206,7 +141,9 @@ const parseDecorators = (node: TSESTree.MethodDefinition) => {
     return args
   })()
 
-  const isDecoratedNullable = isNullableOption(parametersArgument)
+  const decoratorNullable = parametersArgument
+    ? readNullableSpec(parametersArgument)
+    : NULLABLE_NONE
 
   if (
     !typeArgument ||
@@ -232,7 +169,7 @@ const parseDecorators = (node: TSESTree.MethodDefinition) => {
   if (typeFromDecorator === undefined) return undefined
 
   return {
-    isDecoratedNullable,
+    decoratorNullable,
     isDecoratedArray: typeArgument.body.type === AST_NODE_TYPES.ArrayExpression,
     typeFromDecorator,
   }
