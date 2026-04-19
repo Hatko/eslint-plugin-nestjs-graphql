@@ -9,8 +9,8 @@
   "bugs": {
     "url": "https://github.com/Hatko/eslint-plugin-nestjs-graphql/issues"
   },
-  "version": "2.0.0",
-  "description": "Ensure correct typing for NestJS GraphQL decorated methods",
+  "version": "3.0.0",
+  "description": "ESLint rules for type-safe NestJS GraphQL resolvers, object types, and field decorators",
   "main": "./dist/index.js",
   "files": [
     "dist/**"
@@ -21,11 +21,22 @@
   },
   "keywords": [
     "eslint",
-    "plugin",
+    "eslint-plugin",
     "nestjs",
-    "graphql"
+    "nestjs-graphql",
+    "graphql",
+    "resolver",
+    "decorator",
+    "type-safety",
+    "typescript"
   ],
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@biomejs/biome": "2.4.12",
     "@types/estree": "^1.0.8",
@@ -35,6 +46,7 @@
     "typescript": "^6.0.3"
   },
   "peerDependencies": {
+    "eslint": ">=8",
     "typescript": ">=4.3.0"
   }
 }
