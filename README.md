@@ -16,6 +16,7 @@ The plugin supports rules:
 `require-resolver-type-arg-with-resolve-field`
 `no-optional-fields-in-object-type`
 `no-redundant-field-decorator`
+`naming-convention`
 
 ## Motivation
 
@@ -288,6 +289,47 @@ class User {
 }
 ```
 
+### naming-convention
+
+Enforces consistent naming across resolver code:
+
+- `@Query` / `@Mutation` methods are **camelCase**.
+- `@ResolveField` methods are **PascalCase** when they resolve a model (object type), and **camelCase** when they resolve a scalar (`String`, `Int`, `ID`, `Date`, `JSON`, etc.).
+- Classes decorated with `@Resolver(() => FooModel)` are named **`FooResolver`**.
+
+`@ResolveField` methods with no type function (e.g. `@ResolveField()`) and `@Resolver()` without a parent type argument are skipped — there's nothing to anchor the naming to.
+
+*Valid*
+
+```typescript
+@Resolver(() => Author)
+class AuthorResolver {
+  @Query(() => Author)
+  author(@Args('id', { type: () => Int }) id: number): Promise<Author> { ... }
+
+  @Mutation(() => Author)
+  updateAuthor(@Args('id', { type: () => Int }) id: number): Promise<Author> { ... }
+
+  @ResolveField(() => [Book])
+  Books(@Parent() author: Author): Promise<Book[]> { ... }
+
+  @ResolveField(() => Int)
+  bookCount(@Parent() author: Author): Promise<number> { ... }
+}
+```
+
+*Invalid*
+
+```typescript
+@Resolver(() => Author)
+class AuthorsResolver {                         // should be AuthorResolver
+  @Query(() => Author) Author() { ... }         // Query method should be camelCase
+  @Mutation(() => Author) UpdateAuthor() { ... }// Mutation method should be camelCase
+  @ResolveField(() => [Book]) books() { ... }   // Model field — should be PascalCase
+  @ResolveField(() => Int) BookCount() { ... }  // Scalar field — should be camelCase
+}
+```
+
 ### no-optional-fields-in-object-type
 
 Optional (`?`) properties on `@ObjectType` classes are easy to forget to populate — the value is silently `undefined` and the field is absent from the response. Requiring `| null` instead forces an explicit assignment at every construction site, so a missing value becomes a TypeScript error.
@@ -347,6 +389,7 @@ The rules are off by default. To turn them on, add the following to your `.eslin
     "nestjs-graphql/require-resolver-type-arg-with-resolve-field": "error", // `error` level is recommended
     "nestjs-graphql/no-optional-fields-in-object-type": "error", // `error` level is recommended
     "nestjs-graphql/no-redundant-field-decorator": "error", // compiler-plugin only; see rule docs
+    "nestjs-graphql/naming-convention": "error", // `error` level is recommended
   }
 }
 ```
