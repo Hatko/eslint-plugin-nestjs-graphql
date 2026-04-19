@@ -1,11 +1,11 @@
-import { ESLintUtils } from '@typescript-eslint/utils'
-import { TSESTree } from '@typescript-eslint/types/dist'
-import { RuleContext } from '@typescript-eslint/utils/dist/ts-eslint'
+import { AST_NODE_TYPES, TSESLint, TSESTree } from '@typescript-eslint/utils'
 
-const createRule = ESLintUtils.RuleCreator((name) => name)
+import { createRule, getDecoratorName } from './util'
+
+type MessageIds = 'typeMismatch' | 'notDecoratedResolver'
 
 export const rule = createRule({
-  name: 'decorator-return-type',
+  name: 'matching-resolve-field-parent-type',
   defaultOptions: [],
   meta: {
     messages: {
@@ -18,130 +18,83 @@ export const rule = createRule({
     },
     type: 'problem',
   },
-  create: (context) => {
-    return {
-      'MethodDefinition[decorators.length>=1]:exit': (
-        node: TSESTree.MethodDefinition,
-      ) => processNode(node, context),
-    }
-  },
+  create: (context) => ({
+    'MethodDefinition[decorators.length>=1]:exit'(
+      node: TSESTree.MethodDefinition,
+    ) {
+      processNode(node, context)
+    },
+  }),
 })
 
 const processNode = (
   node: TSESTree.MethodDefinition,
-  context: Readonly<
-    RuleContext<'typeMismatch' | 'notDecoratedResolver', never[]>
-  >,
+  context: Readonly<TSESLint.RuleContext<MessageIds, never[]>>,
 ) => {
-  if (node.value.type !== 'FunctionExpression') {
-    console.log('Unexpected value type - please contact the author of the rule')
-    return
-  }
-  if (!node.value.returnType) {
-    return
-  }
+  if (node.value.type !== AST_NODE_TYPES.FunctionExpression) return
+  if (!node.value.returnType) return
 
-  const filteredDecorators = node.decorators.filter((decorator) => {
-    const { expression } = decorator
-    if (expression.type !== 'CallExpression') {
-      console.log(
-        'Unexpected decorator expression type - please contact the author of the rule',
-      )
-      return false
-    }
-    const { callee } = expression
-    if (callee.type !== 'Identifier') {
-      console.log(
-        'Unexpected decorator expression type - please contact the author of the rule',
-      )
-      return false
-    }
-    return callee.name === 'ResolveField'
-  })
-
-  if (!filteredDecorators.length) {
-    return
-  }
+  const hasResolveField = node.decorators.some(
+    (decorator) => getDecoratorName(decorator) === 'ResolveField',
+  )
+  if (!hasResolveField) return
 
   const methodParam = node.value.params.find(
     ({ decorators }) =>
       !!decorators.find(
-        ({ expression }) =>
-          expression.type === 'CallExpression' &&
-          expression.callee.type === 'Identifier' &&
-          expression.callee.name === 'Parent',
+        (decorator) => getDecoratorName(decorator) === 'Parent',
       ),
   )
+  if (!methodParam) return
 
-  if (!methodParam) {
-    // Parent parameter is not used
-
+  if (
+    (methodParam.type !== AST_NODE_TYPES.Identifier &&
+      methodParam.type !== AST_NODE_TYPES.ObjectPattern) ||
+    !methodParam.typeAnnotation ||
+    methodParam.typeAnnotation.typeAnnotation.type !==
+      AST_NODE_TYPES.TSTypeReference ||
+    methodParam.typeAnnotation.typeAnnotation.typeName.type !==
+      AST_NODE_TYPES.Identifier
+  ) {
     return
   }
+  const parentTypeName = methodParam.typeAnnotation.typeAnnotation.typeName.name
 
-  const parentTypeName = (() => {
-    if (
-      (methodParam.type !== 'Identifier' &&
-        methodParam.type !== 'ObjectPattern') ||
-      !methodParam.typeAnnotation ||
-      methodParam.typeAnnotation.typeAnnotation.type !== 'TSTypeReference' ||
-      methodParam.typeAnnotation.typeAnnotation.typeName.type !== 'Identifier'
-    ) {
-      throw new Error(
-        'Unexpected decorator expression type - please contact the author of the rule',
-      )
-    }
+  if (node.parent.parent?.type !== AST_NODE_TYPES.ClassDeclaration) return
 
-    return methodParam.typeAnnotation.typeAnnotation.typeName.name
-  })()
-
-  if (node.parent.parent?.type !== 'ClassDeclaration') {
-    throw new Error(
-      'Unexpected decorator expression type - please contact the author of the rule',
-    )
-  }
-
-  const expression = node.parent.parent.decorators
+  const resolverCall = node.parent.parent.decorators
     .map(({ expression }) => expression)
     .find((expression): expression is TSESTree.CallExpression => {
       if (
-        expression.type !== 'CallExpression' ||
-        expression.callee.type !== 'Identifier'
+        expression.type !== AST_NODE_TYPES.CallExpression ||
+        expression.callee.type !== AST_NODE_TYPES.Identifier
       ) {
         return false
       }
-
       return expression.callee.name === 'Resolver'
     })
 
-  const resolverTypeArgument = expression?.arguments[0]
+  const resolverTypeArgument = resolverCall?.arguments[0]
 
   if (!resolverTypeArgument) {
     context.report({ node, messageId: 'notDecoratedResolver' })
-
     return
   }
 
   const name = (() => {
-    if (resolverTypeArgument.type === 'Identifier') {
+    if (resolverTypeArgument.type === AST_NODE_TYPES.Identifier) {
       return resolverTypeArgument.name
     }
-
     if (
-      resolverTypeArgument.type === 'ArrowFunctionExpression' &&
-      resolverTypeArgument.body.type === 'Identifier'
+      resolverTypeArgument.type === AST_NODE_TYPES.ArrowFunctionExpression &&
+      resolverTypeArgument.body.type === AST_NODE_TYPES.Identifier
     ) {
-      return resolverTypeArgument.body?.name
+      return resolverTypeArgument.body.name
     }
-
-    throw new Error(
-      'Unexpected decorator expression type - please contact the author of the rule',
-    )
+    return undefined
   })()
 
-  if (name === parentTypeName) {
-    return
-  }
+  if (name === undefined || name === parentTypeName) return
 
   context.report({ node, messageId: 'typeMismatch' })
 }

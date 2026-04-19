@@ -1,14 +1,18 @@
+import {
+  AST_NODE_TYPES,
+  ParserServices,
+  TSESLint,
+  TSESTree,
+} from '@typescript-eslint/utils'
 import ts from 'typescript'
 
-import { TSESTree } from '@typescript-eslint/types/dist'
-import { Decorator } from '@typescript-eslint/types/dist/generated/ast-spec'
-import { AST_NODE_TYPES, ESLintUtils } from '@typescript-eslint/utils'
-import { RuleContext } from '@typescript-eslint/utils/dist/ts-eslint'
-import { ParserServices } from '@typescript-eslint/utils/dist/ts-estree'
+import { createRule, findDecoratorByName } from './util'
 
-const createRule = ESLintUtils.RuleCreator((name) => name)
-
-const MODEL_DECORATORS = new Set(['ObjectType', 'InputType', 'InterfaceType'])
+const MODEL_DECORATORS: ReadonlySet<string> = new Set([
+  'ObjectType',
+  'InputType',
+  'InterfaceType',
+])
 const FIELD_DECORATOR_NAME = 'Field'
 const DEFAULT_SCALARS = new Set([
   'String',
@@ -39,30 +43,15 @@ type TypeInfo = {
   node: TSESTree.Node
 }
 
-type FieldDecorator = Omit<Decorator, 'expression'> & {
+type FieldDecorator = Omit<TSESTree.Decorator, 'expression'> & {
   expression: Omit<TSESTree.CallExpression, 'callee'> & {
     callee: TSESTree.Identifier
   }
 }
 
-const decoratorHasName = (decorator: Decorator, names: Set<string>) => {
-  const { expression } = decorator
-
-  if (expression.type === AST_NODE_TYPES.Identifier) {
-    return names.has(expression.name)
-  }
-
-  if (
-    expression.type === AST_NODE_TYPES.CallExpression &&
-    expression.callee.type === AST_NODE_TYPES.Identifier
-  ) {
-    return names.has(expression.callee.name)
-  }
-
-  return false
-}
-
-const isFieldDecorator = (decorator: Decorator): decorator is FieldDecorator =>
+const isFieldDecorator = (
+  decorator: TSESTree.Decorator,
+): decorator is FieldDecorator =>
   decorator.expression.type === AST_NODE_TYPES.CallExpression &&
   decorator.expression.callee.type === AST_NODE_TYPES.Identifier &&
   decorator.expression.callee.name === FIELD_DECORATOR_NAME
@@ -135,7 +124,8 @@ const extractTypeInfosFromTypeNode = (
   if (typeNode.type === AST_NODE_TYPES.TSTypeReference) {
     if (
       typeNode.typeName.type === AST_NODE_TYPES.Identifier &&
-      (typeNode.typeName.name === 'Promise' || typeNode.typeName.name === 'Array')
+      (typeNode.typeName.name === 'Promise' ||
+        typeNode.typeName.name === 'Array')
     ) {
       const [firstArgument] = typeNode.typeArguments?.params ?? []
 
@@ -220,7 +210,10 @@ const tsNodeHasModelDecorator = (node: ts.Node) =>
       return MODEL_DECORATORS.has(expression.text)
     }
 
-    if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression)) {
+    if (
+      ts.isCallExpression(expression) &&
+      ts.isIdentifier(expression.expression)
+    ) {
       return MODEL_DECORATORS.has(expression.expression.text)
     }
 
@@ -265,7 +258,7 @@ const isGraphqlModelSymbol = (
 
 const analyzeModelClass = (
   node: TSESTree.ClassDeclaration,
-  context: Readonly<RuleContext<MessageIds, Options>>,
+  context: Readonly<TSESLint.RuleContext<MessageIds, Options>>,
   services: ParserServices | undefined,
   checker: ts.TypeChecker | undefined,
   allowedScalars: Set<string>,
@@ -300,14 +293,13 @@ const analyzeModelClass = (
       }
 
       const isLocalModel = localModelNames.has(typeInfo.name)
-      const isModelViaTypeInformation =
-        Boolean(
-          hasTypeInformation &&
-            checker &&
-            services &&
-            services.program &&
-            isGraphqlModelSymbol(typeInfo.node, services, checker),
-        )
+      const isModelViaTypeInformation = Boolean(
+        hasTypeInformation &&
+          checker &&
+          services &&
+          services.program &&
+          isGraphqlModelSymbol(typeInfo.node, services, checker),
+      )
       const isModel = isLocalModel || isModelViaTypeInformation
 
       if (!isModel) {
@@ -361,20 +353,19 @@ export const rule = createRule<Options, MessageIds>({
 
     const services = context.parserServices
     const checker = services?.program?.getTypeChecker()
-    const hasTypeInformation =
-      Boolean(
-        checker &&
-          services &&
-          'esTreeNodeToTSNodeMap' in services &&
-          'tsNodeToESTreeNodeMap' in services,
-      )
+    const hasTypeInformation = Boolean(
+      checker &&
+        services &&
+        'esTreeNodeToTSNodeMap' in services &&
+        'tsNodeToESTreeNodeMap' in services,
+    )
 
     const modelClasses: TSESTree.ClassDeclaration[] = []
     const localModelNames = new Set<string>()
 
     return {
       ClassDeclaration(node) {
-        if (!node.decorators?.some((decorator) => decoratorHasName(decorator, MODEL_DECORATORS))) {
+        if (!findDecoratorByName(node.decorators, MODEL_DECORATORS)) {
           return
         }
 

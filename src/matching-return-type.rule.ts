@@ -1,25 +1,28 @@
-import { TSESTree } from '@typescript-eslint/types/dist'
-import { Decorator } from '@typescript-eslint/types/dist/generated/ast-spec'
-import { ESLintUtils } from '@typescript-eslint/utils'
-import { RuleContext } from '@typescript-eslint/utils/dist/ts-eslint'
+import { AST_NODE_TYPES, TSESLint, TSESTree } from '@typescript-eslint/utils'
 
-const createRule = ESLintUtils.RuleCreator((name) => name)
+import {
+  createRule,
+  getDecoratorName,
+  isNullableOption,
+  TS_KEYWORD_TO_GRAPHQL_SCALARS,
+} from './util'
 
-const types = {
-  TSStringKeyword: ['String'],
-  TSBooleanKeyword: ['Boolean'],
-  TSNumberKeyword: ['Int', 'Number', 'Float'],
-}
+const RESOLVER_METHOD_DECORATORS = new Set([
+  'ResolveField',
+  'Query',
+  'Mutation',
+])
 
 const unwrapPromise = (typeNode: TSESTree.TypeNode) => {
   if (
-    typeNode.type === 'TSTypeReference' &&
-    typeNode.typeName.type === 'Identifier' &&
+    typeNode.type === AST_NODE_TYPES.TSTypeReference &&
+    typeNode.typeName.type === AST_NODE_TYPES.Identifier &&
     typeNode.typeName.name === 'Promise' &&
     typeNode.typeArguments
   ) {
     return typeNode.typeArguments.params[0]
   }
+  return undefined
 }
 
 type TypeReferenceIdentifier = Omit<TSESTree.TSTypeReference, 'typeName'> & {
@@ -29,13 +32,19 @@ type TypeReferenceIdentifier = Omit<TSESTree.TSTypeReference, 'typeName'> & {
 const isTypeReferenceIdentifier = (
   typeNode: TSESTree.TypeNode,
 ): typeNode is TypeReferenceIdentifier =>
-  typeNode.type === 'TSTypeReference' && typeNode.typeName.type === 'Identifier'
+  typeNode.type === AST_NODE_TYPES.TSTypeReference &&
+  typeNode.typeName.type === AST_NODE_TYPES.Identifier
 
 const nameFromTypeReferenceIdentifier = (typeNode: TSESTree.TypeNode) =>
   isTypeReferenceIdentifier(typeNode) ? typeNode.typeName.name : undefined
 
+type MessageIds =
+  | 'typeMismatch'
+  | 'typeMismatchArrayIsExpected'
+  | 'unexpectedNullable'
+
 export const rule = createRule({
-  name: 'decorator-return-type',
+  name: 'matching-return-type',
   defaultOptions: [],
   meta: {
     messages: {
@@ -49,96 +58,57 @@ export const rule = createRule({
     },
     type: 'problem',
   },
-  create: (context) => {
-    return {
-      'MethodDefinition[decorators.length>=1]:exit': (
-        node: TSESTree.MethodDefinition,
-      ) => processNode(node, context),
-    }
-  },
+  create: (context) => ({
+    'MethodDefinition[decorators.length>=1]:exit'(
+      node: TSESTree.MethodDefinition,
+    ) {
+      processNode(node, context)
+    },
+  }),
 })
 
 const processNode = (
   node: TSESTree.MethodDefinition,
-  context: Readonly<
-    RuleContext<
-      'typeMismatch' | 'typeMismatchArrayIsExpected' | 'unexpectedNullable',
-      never[]
-    >
-  >,
+  context: Readonly<TSESLint.RuleContext<MessageIds, never[]>>,
 ) => {
-  if (node.value.type !== 'FunctionExpression') {
-    console.log('Unexpected value type - please contact the author of the rule')
-
-    return
-  }
-
-  if (!node.value.returnType) {
-    // No return type case isn't supported
-
-    return
-  }
+  if (node.value.type !== AST_NODE_TYPES.FunctionExpression) return
+  if (!node.value.returnType) return
 
   const parsedDecoratorInfo = parseDecorators(node)
-
-  if (!parsedDecoratorInfo) {
-    return
-  }
+  if (!parsedDecoratorInfo) return
 
   const { isDecoratedNullable, isDecoratedArray, typeFromDecorator } =
     parsedDecoratorInfo
 
   const unwrapUnion = (topReturnType: TSESTree.TSUnionType) => {
     const types = topReturnType.types.map((typeWithinUnion) => {
-      if (typeWithinUnion.type === 'TSArrayType') {
+      if (typeWithinUnion.type === AST_NODE_TYPES.TSArrayType) {
         if (!isDecoratedArray) {
-          context.report({
-            node,
-            messageId: 'typeMismatchArrayIsExpected',
-          })
+          context.report({ node, messageId: 'typeMismatchArrayIsExpected' })
         }
-
         const { elementType } = typeWithinUnion
         return nameFromTypeReferenceIdentifier(elementType) || elementType.type
       }
 
-      if (typeWithinUnion.type === 'TSTypeReference') {
+      if (typeWithinUnion.type === AST_NODE_TYPES.TSTypeReference) {
         const unwrapped = unwrapPromise(typeWithinUnion) ?? typeWithinUnion
-
-        const name = nameFromTypeReferenceIdentifier(unwrapped)
-
-        if (!name) {
-          throw new Error(
-            'Unexpected unwrapped Type - please contact the author of the rule',
-          )
-        }
-
-        return name
+        return nameFromTypeReferenceIdentifier(unwrapped) ?? unwrapped.type
       }
 
       if (
-        typeWithinUnion.type === 'TSTypeOperator' &&
-        typeWithinUnion.operator === 'keyof'
+        typeWithinUnion.type === AST_NODE_TYPES.TSTypeOperator &&
+        typeWithinUnion.operator === 'keyof' &&
+        typeWithinUnion.typeAnnotation?.type === AST_NODE_TYPES.TSTypeQuery &&
+        typeWithinUnion.typeAnnotation.exprName.type ===
+          AST_NODE_TYPES.Identifier
       ) {
-        if (
-          typeWithinUnion.typeAnnotation?.type !== 'TSTypeQuery' ||
-          typeWithinUnion.typeAnnotation?.exprName.type !== 'Identifier'
-        ) {
-          throw new Error(
-            'Unexpected typeAnnotation type - please contact the author of the rule',
-          )
-        }
-
-        return typeWithinUnion.typeAnnotation?.exprName.name
+        return typeWithinUnion.typeAnnotation.exprName.name
       }
 
-      if (typeWithinUnion.type === 'TSTypeQuery') {
-        if (typeWithinUnion.exprName.type !== 'Identifier') {
-          throw new Error(
-            'Unexpected typeAnnotation type - please contact the author of the rule',
-          )
-        }
-
+      if (
+        typeWithinUnion.type === AST_NODE_TYPES.TSTypeQuery &&
+        typeWithinUnion.exprName.type === AST_NODE_TYPES.Identifier
+      ) {
         return typeWithinUnion.exprName.name
       }
 
@@ -146,18 +116,21 @@ const processNode = (
     })
 
     if (
-      types.find((t) => t === 'TSNullKeyword' || t === 'TSUndefinedKeyword') &&
+      types.find(
+        (t) =>
+          t === AST_NODE_TYPES.TSNullKeyword ||
+          t === AST_NODE_TYPES.TSUndefinedKeyword,
+      ) &&
       !isDecoratedNullable
     ) {
-      context.report({
-        node,
-        messageId: 'unexpectedNullable',
-      })
+      context.report({ node, messageId: 'unexpectedNullable' })
     }
 
     return {
       type: types.filter(
-        (t) => t !== 'TSNullKeyword' && t !== 'TSUndefinedKeyword',
+        (t) =>
+          t !== AST_NODE_TYPES.TSNullKeyword &&
+          t !== AST_NODE_TYPES.TSUndefinedKeyword,
       )[0],
     }
   }
@@ -170,28 +143,22 @@ const processNode = (
     if (isDecoratedArray) {
       if (
         isTypeReferenceIdentifier(topReturnType) &&
-        topReturnType.typeName.name === 'Array'
+        topReturnType.typeName.name === 'Array' &&
+        topReturnType.typeArguments?.params[0]?.type ===
+          AST_NODE_TYPES.TSTypeQuery &&
+        topReturnType.typeArguments.params[0].exprName.type ===
+          AST_NODE_TYPES.Identifier
       ) {
-        if (
-          topReturnType.typeArguments?.params[0].type !== 'TSTypeQuery' ||
-          topReturnType.typeArguments?.params[0].exprName.type !== 'Identifier'
-        ) {
-          throw new Error(
-            'Unexpected array argument type - please contact the author of the rule',
-          )
-        }
-
         return topReturnType.typeArguments.params[0].exprName.name
       }
 
-      if (topReturnType.type === 'TSArrayType') {
+      if (topReturnType.type === AST_NODE_TYPES.TSArrayType) {
         const { elementType } = topReturnType
-
         return nameFromTypeReferenceIdentifier(elementType) || elementType.type
       }
 
-      if (topReturnType.type === 'TSUnionType') {
-        return unwrapUnion(topReturnType).type
+      if (topReturnType.type === AST_NODE_TYPES.TSUnionType) {
+        return unwrapUnion(topReturnType)?.type
       }
 
       // Type isn't found - return 'Array' to trigger error
@@ -199,125 +166,74 @@ const processNode = (
     }
 
     const name = nameFromTypeReferenceIdentifier(topReturnType)
+    if (name) return name
 
-    if (name) {
-      return name
-    }
-
-    if (topReturnType.type === 'TSUnionType') {
-      return unwrapUnion(topReturnType).type
+    if (topReturnType.type === AST_NODE_TYPES.TSUnionType) {
+      return unwrapUnion(topReturnType)?.type
     }
 
     return topReturnType.type
   })()
 
-  if (typeToCompare === typeFromDecorator) {
-    return
-  }
+  if (typeToCompare === typeFromDecorator) return
 
-  const foundTypes = types[typeToCompare as keyof typeof types]
-
-  if (foundTypes?.some((t) => t === typeFromDecorator)) {
-    return
+  if (typeof typeToCompare === 'string') {
+    const matches = TS_KEYWORD_TO_GRAPHQL_SCALARS[typeToCompare]
+    if (matches?.includes(typeFromDecorator)) return
   }
 
   context.report({ node, messageId: 'typeMismatch' })
 }
 
-type TypedDecorator = Omit<Decorator, 'expression'> & {
-  expression: Omit<TSESTree.CallExpression, 'callee'> & {
-    callee: TSESTree.Identifier
-  }
-}
-
-const checkDecoratedNullable = (
-  parametersArgument: TSESTree.CallExpressionArgument,
-) =>
-  parametersArgument.type === 'ObjectExpression' &&
-  parametersArgument.properties.some(
-    (p) =>
-      p.type === 'Property' &&
-      p.key.type === 'Identifier' &&
-      p.key.name === 'nullable' &&
-      p.value.type === 'Literal' &&
-      p.value.value,
-  )
-
 const parseDecorators = (node: TSESTree.MethodDefinition) => {
-  const filteredDecorators = node.decorators.filter(
-    (decorator): decorator is TypedDecorator => {
-      const { expression } = decorator
+  const filteredDecorators = node.decorators.filter((decorator) => {
+    const name = getDecoratorName(decorator)
+    return name !== undefined && RESOLVER_METHOD_DECORATORS.has(name)
+  })
 
-      if (expression.type !== 'CallExpression') {
-        console.log(
-          'Unexpected decorator expression type - please contact the author of the rule',
-        )
-        return false
-      }
-
-      const { callee } = expression
-
-      if (callee.type !== 'Identifier') {
-        console.log(
-          'Unexpected decorator expression type - please contact the author of the rule',
-        )
-        return false
-      }
-
-      return (
-        callee.name === 'ResolveField' ||
-        callee.name === 'Query' ||
-        callee.name === 'Mutation'
-      )
-    },
-  )
-
-  const args = filteredDecorators[0]?.expression?.arguments
-
-  if (!args) {
+  const expression = filteredDecorators[0]?.expression
+  if (!expression || expression.type !== AST_NODE_TYPES.CallExpression) {
     return undefined
   }
+  const args = expression.arguments
+  if (args.length === 0) return undefined
 
   const [typeArgument, parametersArgument] = (() => {
-    // ResolveField decorator supports passing name of the resolved field as a first parameter
-    // If it's passed, ignore it
-    if (args[0].type === 'Literal') {
+    // @ResolveField supports a name as first parameter — skip it if present
+    if (args[0]?.type === AST_NODE_TYPES.Literal) {
       return [args[1], args[2]]
     }
-
     return args
   })()
 
-  const isDecoratedNullable =
-    (parametersArgument && checkDecoratedNullable(parametersArgument)) || false
+  const isDecoratedNullable = isNullableOption(parametersArgument)
 
   if (
-    typeArgument.type !== 'ArrowFunctionExpression' ||
-    (typeArgument.body.type !== 'Identifier' &&
-      typeArgument.body.type !== 'ArrayExpression')
+    !typeArgument ||
+    typeArgument.type !== AST_NODE_TYPES.ArrowFunctionExpression
   ) {
-    throw new Error(
-      'Unexpected first argument type - please contact the author of the rule',
-    )
+    return undefined
+  }
+  if (
+    typeArgument.body.type !== AST_NODE_TYPES.Identifier &&
+    typeArgument.body.type !== AST_NODE_TYPES.ArrayExpression
+  ) {
+    return undefined
   }
 
   const typeFromDecorator = (() => {
-    if (typeArgument.body.type === 'ArrayExpression') {
-      if (typeArgument.body.elements[0]?.type === 'Identifier') {
-        return typeArgument.body.elements[0]?.name
-      }
-
-      throw new Error(
-        'Unexpected Array Element Type - please contact the author of the rule',
-      )
+    if (typeArgument.body.type === AST_NODE_TYPES.ArrayExpression) {
+      const first = typeArgument.body.elements[0]
+      return first?.type === AST_NODE_TYPES.Identifier ? first.name : undefined
     }
-
     return typeArgument.body.name
   })()
 
+  if (typeFromDecorator === undefined) return undefined
+
   return {
     isDecoratedNullable,
-    isDecoratedArray: typeArgument.body.type === 'ArrayExpression',
+    isDecoratedArray: typeArgument.body.type === AST_NODE_TYPES.ArrayExpression,
     typeFromDecorator,
   }
 }

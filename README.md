@@ -10,7 +10,9 @@ The plugin supports rules:
 
 `matching-return-type`
 `matching-resolve-field-parent-type`
+`matching-args-type`
 `require-resolve-field-for-nested-models`
+`require-resolver-type-arg-with-resolve-field`
 `no-optional-fields-in-object-type`
 
 ## Motivation
@@ -167,6 +169,56 @@ class User {
 }
 ```
 
+### matching-args-type
+
+Mirrors `matching-return-type`, but on `@Args` parameters. When `@Args('name', { type: () => X, nullable?: boolean })` is given, this rule verifies that the TypeScript parameter type matches the declared `type`, and that `{ nullable: true }` agrees with the presence of `| null` / `| undefined` / `?` in the annotation. When `@Args` has no options object, analysis is skipped — the compiler plugin infers from TypeScript, so there's nothing to drift.
+
+*Valid*
+
+```typescript
+  @Query(() => User)
+  user(
+    @Args('id', { type: () => Int }) id: number,
+    @Args('filter', { type: () => String, nullable: true }) filter: string | null,
+  ) { ... }
+```
+
+*Invalid*
+
+```typescript
+  @Query(() => User)
+  user(@Args('id', { type: () => Int }) id: string) { ... }  // Int vs string
+```
+
+```typescript
+  @Query(() => User)
+  user(@Args('id', { type: () => Int, nullable: true }) id: number) { ... }  // nullable: true without | null
+```
+
+### require-resolver-type-arg-with-resolve-field
+
+`@Resolver()` without a parent type argument is incompatible with `@ResolveField` methods (they need a parent to attach to). This rule fails the class-level `@Resolver()` decorator whenever it contains any `@ResolveField`. Complements `matching-resolve-field-parent-type`, which only fires when a `@Parent()` parameter is present.
+
+*Valid*
+
+```typescript
+@Resolver(() => User)
+class UserResolver {
+  @ResolveField(() => [Post])
+  posts(@Parent() user: User) { ... }
+}
+```
+
+*Invalid*
+
+```typescript
+@Resolver()
+class UserResolver {
+  @ResolveField(() => [Post])
+  posts(@Parent() user: User) { ... }
+}
+```
+
 ### no-optional-fields-in-object-type
 
 Optional (`?`) properties on `@ObjectType` classes are easy to forget to populate — the value is silently `undefined` and the field is absent from the response. Requiring `| null` instead forces an explicit assignment at every construction site, so a missing value becomes a TypeScript error.
@@ -206,7 +258,9 @@ The rules are off by default. To turn them on, add the following to your `.eslin
   "rules": {
     "nestjs-graphql/matching-return-type": "error", // `error` level is recommended
     "nestjs-graphql/matching-resolve-field-parent-type": "error", // `error` level is recommended
+    "nestjs-graphql/matching-args-type": "error", // `error` level is recommended
     "nestjs-graphql/require-resolve-field-for-nested-models": "error", // `error` level is recommended
+    "nestjs-graphql/require-resolver-type-arg-with-resolve-field": "error", // `error` level is recommended
     "nestjs-graphql/no-optional-fields-in-object-type": "error", // `error` level is recommended
   }
 }
