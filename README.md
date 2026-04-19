@@ -10,6 +10,7 @@ The plugin supports rules:
 
 `matching-return-type`
 `matching-resolve-field-parent-type`
+`require-resolve-field-for-nested-models`
 
 ## Motivation
 
@@ -133,6 +134,38 @@ This rule aims to solve this issue by checking the type of the `@Parent` against
   }
 ```
 
+### require-resolve-field-for-nested-models
+
+GraphQL object relationships should be resolved in dedicated resolvers using `@ResolveField`. Declaring nested models directly on another `@ObjectType()` can lead to unexpected schema nesting and makes it harder to reuse resolvers.
+
+*Valid*
+
+```typescript
+@ObjectType()
+class User {
+  @Field(() => ID)
+  id!: string;
+}
+
+@Resolver(() => User)
+class UserResolver {
+  @ResolveField(() => Profile)
+  profile(@Parent() user: User): Promise<Profile> {
+    return this.profileService.byUserId(user.id);
+  }
+}
+```
+
+*Invalid*
+
+```typescript
+@ObjectType()
+class User {
+  @Field(() => Profile)
+  profile!: Profile;
+}
+```
+
 ## Installation
 
 ```sh
@@ -148,6 +181,7 @@ The rules are off by default. To turn them on, add the following to your `.eslin
   "rules": {
     "nestjs-graphql/matching-return-type": "error", // `error` level is recommended
     "nestjs-graphql/matching-resolve-field-parent-type": "error", // `error` level is recommended
+    "nestjs-graphql/require-resolve-field-for-nested-models": "error", // `error` level is recommended
   }
 }
 ```
